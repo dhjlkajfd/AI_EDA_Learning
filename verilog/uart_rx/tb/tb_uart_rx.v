@@ -60,6 +60,7 @@ module tb_uart_rx;
         run_uart_rx_test(8'hA5);
         run_uart_rx_test(8'h00);
         run_uart_rx_test(8'hFF);
+        test_false_start_ignored;
 
         repeat (20) @(posedge clk);
 
@@ -93,6 +94,55 @@ module tb_uart_rx;
             end
 
             repeat (5) @(posedge clk);
+        end
+    endtask
+
+    task test_false_start_ignored;
+        integer wait_count;
+        integer start_error_count;
+        integer pulse_clks;
+        begin
+            start_error_count = error_count;
+            pulse_clks = (CLKS_PER_BIT / 4);
+
+            if (pulse_clks < 1) begin
+                pulse_clks = 1;
+            end
+
+            $display("Testing false start: test_false_start_ignored");
+
+            rx = 1'b1;
+            repeat (5) @(posedge clk);
+
+            @(negedge clk);
+            rx = 1'b0;
+            repeat (pulse_clks) @(posedge clk);
+
+            @(negedge clk);
+            rx = 1'b1;
+
+            for (wait_count = 0; wait_count < FRAME_WAIT_CLKS; wait_count = wait_count + 1) begin
+                @(posedge clk);
+                #1;
+
+                if (data_valid === 1'b1) begin
+                    error_count = error_count + 1;
+                    $display("FAIL: false start generated data_valid. data_out=0x%02h wait_count=%0d",
+                             data_out, wait_count);
+                end
+            end
+
+            if (busy !== 1'b0) begin
+                error_count = error_count + 1;
+                $display("FAIL: DUT did not return to idle after false start. busy=%b", busy);
+            end
+
+            if (error_count == start_error_count) begin
+                $display("PASS: test_false_start_ignored");
+            end else begin
+                $display("FAIL: test_false_start_ignored. new_errors=%0d",
+                         error_count - start_error_count);
+            end
         end
     endtask
 

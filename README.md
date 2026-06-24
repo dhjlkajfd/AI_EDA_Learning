@@ -7,8 +7,8 @@ This repository records my AI-assisted Verilog / FPGA / RTL learning and practic
 | Project | Description | Status |
 |---|---|---|
 | UART TX | Verilog UART transmitter with self-checking testbench | Completed |
-| UART RX | UART receiver module | Planned |
-| UART Loopback | UART TX + RX loopback system | Planned |
+| UART RX | Verilog UART receiver with self-checking testbench | Completed |
+| UART Loopback | UART TX + RX internal loopback system | Completed |
 
 ## UART TX Highlights
 

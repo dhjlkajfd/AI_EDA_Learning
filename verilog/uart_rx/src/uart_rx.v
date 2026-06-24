@@ -26,6 +26,8 @@ module uart_rx #(
     reg [31:0] baud_cnt;
     reg [2:0]  bit_idx;
     reg [7:0]  rx_shift;
+    reg        rx_sync_0;
+    reg        rx_sync_1;
 
     always @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
@@ -33,10 +35,14 @@ module uart_rx #(
             baud_cnt   <= 32'd0;
             bit_idx    <= 3'd0;
             rx_shift   <= 8'd0;
+            rx_sync_0  <= 1'b1;
+            rx_sync_1  <= 1'b1;
             data_out   <= 8'd0;
             data_valid <= 1'b0;
             busy       <= 1'b0;
         end else begin
+            rx_sync_0  <= rx;
+            rx_sync_1  <= rx_sync_0;
             data_valid <= 1'b0;
 
             case (state)
@@ -45,7 +51,7 @@ module uart_rx #(
                     baud_cnt <= 32'd0;
                     bit_idx  <= 3'd0;
 
-                    if (rx == 1'b0) begin
+                    if (rx_sync_1 == 1'b0) begin
                         busy  <= 1'b1;
                         state <= START;
                     end
@@ -57,7 +63,7 @@ module uart_rx #(
                     if (baud_cnt == HALF_CLKS_PER_BIT - 1) begin
                         baud_cnt <= 32'd0;
 
-                        if (rx == 1'b0) begin
+                        if (rx_sync_1 == 1'b0) begin
                             state <= DATA;
                         end else begin
                             busy  <= 1'b0;
@@ -73,7 +79,7 @@ module uart_rx #(
 
                     if (baud_cnt == CLKS_PER_BIT - 1) begin
                         baud_cnt         <= 32'd0;
-                        rx_shift[bit_idx] <= rx;
+                        rx_shift[bit_idx] <= rx_sync_1;
 
                         if (bit_idx == 3'd7) begin
                             bit_idx <= 3'd0;
@@ -94,7 +100,7 @@ module uart_rx #(
                         busy     <= 1'b0;
                         state    <= IDLE;
 
-                        if (rx == 1'b1) begin
+                        if (rx_sync_1 == 1'b1) begin
                             data_out   <= rx_shift;
                             data_valid <= 1'b1;
                         end

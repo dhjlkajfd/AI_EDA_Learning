@@ -1,0 +1,154 @@
+`timescale 1ns / 1ps
+
+module tb_uart_rx;
+
+    parameter CLK_FREQ        = 50000000;
+    parameter BAUD_RATE       = 115200;
+    parameter CLKS_PER_BIT    = CLK_FREQ / BAUD_RATE;
+    parameter CLK_PERIOD      = 20;
+    parameter FRAME_WAIT_CLKS = 12 * CLKS_PER_BIT;
+    parameter GLOBAL_TIMEOUT  = (FRAME_WAIT_CLKS * 8) + 1000;
+
+    reg        clk;
+    reg        rst_n;
+    reg        rx;
+    wire [7:0] data_out;
+    wire       data_valid;
+    wire       busy;
+
+    integer error_count;
+    integer i;
+
+    uart_rx #(
+        .CLK_FREQ(CLK_FREQ),
+        .BAUD_RATE(BAUD_RATE)
+    ) dut (
+        .clk(clk),
+        .rst_n(rst_n),
+        .rx(rx),
+        .data_out(data_out),
+        .data_valid(data_valid),
+        .busy(busy)
+    );
+
+    initial begin
+        clk = 1'b0;
+        forever #(CLK_PERIOD / 2) clk = ~clk;
+    end
+
+    initial begin
+        repeat (GLOBAL_TIMEOUT) @(posedge clk);
+        $display("FAIL/TIMEOUT: UART RX simulation timeout at time %0t.", $time);
+        $finish;
+    end
+
+    initial begin
+        $dumpfile("uart_rx.vcd");
+        $dumpvars(0, tb_uart_rx);
+
+        error_count = 0;
+        rst_n = 1'b0;
+        rx = 1'b1;
+
+        repeat (10) @(posedge clk);
+        @(negedge clk);
+        rst_n = 1'b1;
+        repeat (10) @(posedge clk);
+
+        run_uart_rx_test(8'h55);
+        run_uart_rx_test(8'hA5);
+        run_uart_rx_test(8'h00);
+        run_uart_rx_test(8'hFF);
+
+        repeat (20) @(posedge clk);
+
+        if (error_count == 0) begin
+            $display("PASS: UART RX test completed successfully.");
+        end else begin
+            $display("FAIL: UART RX test failed. error_count = %0d", error_count);
+        end
+
+        $finish;
+    end
+
+    task run_uart_rx_test;
+        input [7:0] expected_data;
+        integer start_error_count;
+        begin
+            start_error_count = error_count;
+            $display("Testing RX byte: 0x%02h", expected_data);
+
+            fork
+                drive_uart_frame(expected_data);
+                check_received_byte(expected_data);
+            join
+
+            if (error_count == start_error_count) begin
+                $display("PASS: RX byte 0x%02h received correctly.", expected_data);
+            end else begin
+                $display("FAIL: RX byte 0x%02h failed. new_errors=%0d",
+                         expected_data, error_count - start_error_count);
+            end
+
+            repeat (5) @(posedge clk);
+        end
+    endtask
+
+    task drive_uart_frame;
+        input [7:0] send_data;
+        integer bit_num;
+        begin
+            rx = 1'b1;
+            repeat (2) @(posedge clk);
+
+            @(negedge clk);
+            rx = 1'b0;
+            repeat (CLKS_PER_BIT) @(posedge clk);
+
+            for (bit_num = 0; bit_num < 8; bit_num = bit_num + 1) begin
+                @(negedge clk);
+                rx = send_data[bit_num];
+                repeat (CLKS_PER_BIT) @(posedge clk);
+            end
+
+            @(negedge clk);
+            rx = 1'b1;
+            repeat (CLKS_PER_BIT) @(posedge clk);
+        end
+    endtask
+
+    task check_received_byte;
+        input [7:0] expected_data;
+        integer wait_count;
+        begin
+            wait_count = 0;
+
+            while ((data_valid !== 1'b1) && (wait_count < FRAME_WAIT_CLKS)) begin
+                @(posedge clk);
+                #1;
+                wait_count = wait_count + 1;
+            end
+
+            if (data_valid !== 1'b1) begin
+                error_count = error_count + 1;
+                $display("FAIL/TIMEOUT: data_valid did not assert for expected byte 0x%02h.", expected_data);
+                $finish;
+            end
+
+            if (data_out !== expected_data) begin
+                error_count = error_count + 1;
+                $display("FAIL: RX data mismatch. expected=0x%02h actual=0x%02h",
+                         expected_data, data_out);
+            end
+
+            @(posedge clk);
+            #1;
+
+            if (data_valid !== 1'b0) begin
+                error_count = error_count + 1;
+                $display("FAIL: data_valid should be a one-clock pulse.");
+            end
+        end
+    endtask
+
+endmodule

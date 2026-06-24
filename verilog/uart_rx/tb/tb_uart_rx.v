@@ -7,6 +7,7 @@ module tb_uart_rx;
     parameter CLKS_PER_BIT    = CLK_FREQ / BAUD_RATE;
     parameter CLK_PERIOD      = 20;
     parameter FRAME_WAIT_CLKS = 12 * CLKS_PER_BIT;
+    parameter BUSY_WAIT_CLKS  = 2 * CLKS_PER_BIT;
     parameter GLOBAL_TIMEOUT  = (FRAME_WAIT_CLKS * 8) + 1000;
 
     reg        clk;
@@ -81,6 +82,7 @@ module tb_uart_rx;
             fork
                 drive_uart_frame(expected_data);
                 check_received_byte(expected_data);
+                check_busy_behavior(expected_data);
             join
 
             if (error_count == start_error_count) begin
@@ -114,6 +116,66 @@ module tb_uart_rx;
             @(negedge clk);
             rx = 1'b1;
             repeat (CLKS_PER_BIT) @(posedge clk);
+        end
+    endtask
+
+    task check_busy_behavior;
+        input [7:0] expected_data;
+        integer wait_count;
+        integer monitor_count;
+        integer busy_error_seen;
+        begin
+            wait_count = 0;
+            monitor_count = 0;
+            busy_error_seen = 0;
+
+            while ((busy !== 1'b1) && (wait_count < BUSY_WAIT_CLKS)) begin
+                @(posedge clk);
+                #1;
+                wait_count = wait_count + 1;
+            end
+
+            if (busy !== 1'b1) begin
+                error_count = error_count + 1;
+                $display("FAIL: busy did not assert after RX frame started. expected_data=0x%02h",
+                         expected_data);
+                $finish;
+            end
+
+            while ((data_valid !== 1'b1) && (monitor_count < FRAME_WAIT_CLKS)) begin
+                @(posedge clk);
+                #1;
+                monitor_count = monitor_count + 1;
+
+                if ((data_valid !== 1'b1) && (busy !== 1'b1) &&
+                    (busy_error_seen == 0)) begin
+                    busy_error_seen = 1;
+                    error_count = error_count + 1;
+                    $display("FAIL: busy deasserted before RX frame completed. expected_data=0x%02h monitor_count=%0d",
+                             expected_data, monitor_count);
+                end
+            end
+
+            if (data_valid !== 1'b1) begin
+                error_count = error_count + 1;
+                $display("FAIL/TIMEOUT: data_valid did not assert during busy behavior check. expected_data=0x%02h",
+                         expected_data);
+                $finish;
+            end
+
+            @(posedge clk);
+            #1;
+
+            if (busy !== 1'b0) begin
+                busy_error_seen = 1;
+                error_count = error_count + 1;
+                $display("FAIL: busy should be 0 after RX frame completion. expected_data=0x%02h busy=%b",
+                         expected_data, busy);
+            end
+
+            if (busy_error_seen == 0) begin
+                $display("PASS: busy behavior OK for RX byte 0x%02h.", expected_data);
+            end
         end
     endtask
 

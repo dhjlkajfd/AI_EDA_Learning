@@ -1,0 +1,19 @@
+# Simulation outputs
+*.vcd
+*.vvp
+*.out
+
+# Build folders
+build/
+
+# Tool logs
+*.log
+*.jou
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Editor folders
+.vscode/
+.idea/

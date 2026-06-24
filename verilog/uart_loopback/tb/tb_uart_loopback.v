@@ -6,6 +6,8 @@ module tb_uart_loopback;
     parameter BAUD_RATE     = 115200;
     parameter CLKS_PER_BIT  = CLK_FREQ / BAUD_RATE;
     parameter CLK_PERIOD    = 20;
+    parameter FRAME_CLKS    = 10 * CLKS_PER_BIT;
+    parameter BUSY_TOL      = 3;
     parameter FRAME_TIMEOUT = 25 * CLKS_PER_BIT;
     parameter BUSY_TIMEOUT  = 4 * CLKS_PER_BIT;
     parameter GLOBAL_TIMEOUT = (FRAME_TIMEOUT * 10) + 1000;
@@ -89,9 +91,11 @@ module tb_uart_loopback;
             $display("Testing loopback byte: 0x%02h", test_data);
 
             send_loopback_byte(test_data);
-            wait_for_tx_busy_high(BUSY_TIMEOUT);
-            wait_for_rx_busy_high(BUSY_TIMEOUT);
-            wait_for_rx_data(test_data, FRAME_TIMEOUT);
+            fork
+                check_tx_busy_behavior(test_data);
+                check_rx_busy_behavior(test_data);
+                wait_for_rx_data(test_data, FRAME_TIMEOUT);
+            join
             check_busy_low_after_frame(test_data);
 
             if (error_count == start_error_count) begin
@@ -172,13 +176,15 @@ module tb_uart_loopback;
         end
     endtask
 
-    task wait_for_tx_busy_high;
-        input integer max_cycles;
+    task check_tx_busy_behavior;
+        input [7:0] expected_data;
         integer wait_count;
+        integer high_count;
         begin
             wait_count = 0;
+            high_count = 0;
 
-            while ((tx_busy !== 1'b1) && (wait_count < max_cycles)) begin
+            while ((tx_busy !== 1'b1) && (wait_count < BUSY_TIMEOUT)) begin
                 @(posedge clk);
                 #1;
                 wait_count = wait_count + 1;
@@ -186,19 +192,50 @@ module tb_uart_loopback;
 
             if (tx_busy !== 1'b1) begin
                 error_count = error_count + 1;
-                $display("FAIL: tx_busy did not assert within %0d clocks.", max_cycles);
+                $display("FAIL: tx_busy did not assert within %0d clocks. expected_data=0x%02h",
+                         BUSY_TIMEOUT, expected_data);
                 $finish;
+            end
+
+            high_count = 1;
+            while ((tx_busy === 1'b1) && (high_count <= FRAME_TIMEOUT)) begin
+                @(posedge clk);
+                #1;
+
+                if (tx_busy === 1'b1) begin
+                    high_count = high_count + 1;
+                end
+            end
+
+            if (tx_busy === 1'b1) begin
+                error_count = error_count + 1;
+                $display("FAIL/TIMEOUT: tx_busy did not deassert after %0d clocks. expected_data=0x%02h",
+                         FRAME_TIMEOUT, expected_data);
+                $finish;
+            end
+
+            if (high_count < (FRAME_CLKS - BUSY_TOL)) begin
+                error_count = error_count + 1;
+                $display("FAIL: tx_busy dropped early. expected_data=0x%02h min_cycles=%0d actual_cycles=%0d",
+                         expected_data, FRAME_CLKS - BUSY_TOL, high_count);
+            end else begin
+                $display("PASS: tx_busy held through TX frame. data=0x%02h cycles=%0d",
+                         expected_data, high_count);
             end
         end
     endtask
 
-    task wait_for_rx_busy_high;
-        input integer max_cycles;
+    task check_rx_busy_behavior;
+        input [7:0] expected_data;
         integer wait_count;
+        integer monitor_count;
+        integer busy_error_seen;
         begin
             wait_count = 0;
+            monitor_count = 0;
+            busy_error_seen = 0;
 
-            while ((rx_busy !== 1'b1) && (wait_count < max_cycles)) begin
+            while ((rx_busy !== 1'b1) && (wait_count < BUSY_TIMEOUT)) begin
                 @(posedge clk);
                 #1;
                 wait_count = wait_count + 1;
@@ -206,8 +243,45 @@ module tb_uart_loopback;
 
             if (rx_busy !== 1'b1) begin
                 error_count = error_count + 1;
-                $display("FAIL: rx_busy did not assert within %0d clocks.", max_cycles);
+                $display("FAIL: rx_busy did not assert within %0d clocks. expected_data=0x%02h",
+                         BUSY_TIMEOUT, expected_data);
                 $finish;
+            end
+
+            while ((rx_data_valid !== 1'b1) && (monitor_count < FRAME_TIMEOUT)) begin
+                @(posedge clk);
+                #1;
+                monitor_count = monitor_count + 1;
+
+                if ((rx_data_valid !== 1'b1) && (rx_busy !== 1'b1) &&
+                    (busy_error_seen == 0)) begin
+                    busy_error_seen = 1;
+                    error_count = error_count + 1;
+                    $display("FAIL: rx_busy dropped before rx_data_valid. expected_data=0x%02h monitor_count=%0d",
+                             expected_data, monitor_count);
+                end
+            end
+
+            if (rx_data_valid !== 1'b1) begin
+                error_count = error_count + 1;
+                $display("FAIL/TIMEOUT: rx_data_valid missing during rx_busy check. expected_data=0x%02h",
+                         expected_data);
+                $finish;
+            end
+
+            @(posedge clk);
+            #1;
+
+            if (rx_busy !== 1'b0) begin
+                busy_error_seen = 1;
+                error_count = error_count + 1;
+                $display("FAIL: rx_busy should return to 0 after rx_data_valid. expected_data=0x%02h busy=%b",
+                         expected_data, rx_busy);
+            end
+
+            if (busy_error_seen == 0) begin
+                $display("PASS: rx_busy held through RX frame. data=0x%02h",
+                         expected_data);
             end
         end
     endtask

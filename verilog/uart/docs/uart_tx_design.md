@@ -43,3 +43,29 @@ States:
 - Data is transmitted LSB first.
 - busy is high during transmission.
 - New data is accepted only when the module is idle.
+
+## Handshake Rule
+
+The UART TX module uses a simple `data_valid / busy` handshake.
+
+A new byte is accepted only when:
+
+```text
+data_valid = 1
+busy       = 0
+
+
+# UART TX Design Document
+
+## 1. Design Goal
+
+This project implements a simple UART transmitter using Verilog HDL.
+
+The module converts 8-bit parallel input data into a serial UART frame.
+
+## 2. UART Frame Format
+
+The UART frame format is:
+
+```text
+1 start bit + 8 data bits + 1 stop bit

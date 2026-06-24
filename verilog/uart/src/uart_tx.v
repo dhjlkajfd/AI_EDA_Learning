@@ -14,6 +14,12 @@ module uart_tx #(
     output reg        busy
 );
 
+    // Handshake rule:
+    // - data_valid is accepted only when busy is 0.
+    // - data_in is sampled when a valid request is accepted.
+    // - data_valid asserted while busy is 1 is ignored.
+    // - No FIFO is implemented; requests during busy are not buffered.
+
     localparam integer CLKS_PER_BIT = CLK_FREQ / BAUD_RATE;
 
     localparam [1:0]
@@ -23,14 +29,14 @@ module uart_tx #(
         STOP  = 2'd3;
 
     reg [1:0]  state;
-    reg [15:0] baud_cnt;
+    reg [31:0] baud_cnt;
     reg [2:0]  bit_idx;
     reg [7:0]  shift_reg;
 
     always @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
             state     <= IDLE;
-            baud_cnt  <= 16'd0;
+            baud_cnt  <= 32'd0;
             bit_idx   <= 3'd0;
             shift_reg <= 8'd0;
             tx        <= 1'b1;
@@ -41,7 +47,7 @@ module uart_tx #(
                 IDLE: begin
                     tx       <= 1'b1;
                     busy     <= 1'b0;
-                    baud_cnt <= 16'd0;
+                    baud_cnt <= 32'd0;
                     bit_idx  <= 3'd0;
 
                     if (data_valid) begin
@@ -57,7 +63,7 @@ module uart_tx #(
                     tx   <= 1'b0;
 
                     if (baud_cnt == CLKS_PER_BIT - 1) begin
-                        baud_cnt <= 16'd0;
+                        baud_cnt <= 32'd0;
                         state    <= DATA;
                         tx       <= shift_reg[0];
                     end else begin
@@ -70,7 +76,7 @@ module uart_tx #(
                     tx   <= shift_reg[bit_idx];
 
                     if (baud_cnt == CLKS_PER_BIT - 1) begin
-                        baud_cnt <= 16'd0;
+                        baud_cnt <= 32'd0;
 
                         if (bit_idx == 3'd7) begin
                             bit_idx <= 3'd0;
@@ -90,7 +96,7 @@ module uart_tx #(
                     tx   <= 1'b1;
 
                     if (baud_cnt == CLKS_PER_BIT - 1) begin
-                        baud_cnt <= 16'd0;
+                        baud_cnt <= 32'd0;
                         busy     <= 1'b0;
                         state    <= IDLE;
                     end else begin
@@ -100,7 +106,7 @@ module uart_tx #(
 
                 default: begin
                     state     <= IDLE;
-                    baud_cnt  <= 16'd0;
+                    baud_cnt  <= 32'd0;
                     bit_idx   <= 3'd0;
                     shift_reg <= 8'd0;
                     tx        <= 1'b1;

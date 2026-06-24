@@ -1,38 +1,41 @@
-# UART Project
+# UART TX Verilog Project
 
-## Goal
+## 1. Project Overview
 
-This project implements a UART transmitter and its testbench.
+This project implements a simple UART transmitter using Verilog HDL.
 
-## Module List
+It includes:
 
-- uart_tx.v
-- tb_uart_tx.v
+- UART TX RTL design
+- Self-checking Verilog testbench
+- UART frame duration check
+- Handshake behavior verification
+- Timeout protection in testbench
+- Icarus Verilog simulation
+- PowerShell simulation script
 
-## UART TX Features
+## 2. Features
 
-- 50MHz input clock
-- 115200 baud rate
-- 8-bit data
+- 8-bit UART transmission
 - 1 start bit
 - 8 data bits
 - 1 stop bit
-- LSB first
-- busy output
-- data_valid input handshake
+- No parity bit
+- Parameterized clock frequency and baud rate
+- `busy` signal during transmission
+- Self-checking testbench
+- Verification that `data_valid` during `busy = 1` is ignored
 
-## Directory Structure
+## 3. Directory Structure
 
-uart/
+```text
+verilog/uart/
 ├── src/
 │   └── uart_tx.v
 ├── tb/
 │   └── tb_uart_tx.v
+├── sim/
+│   └── run_sim.ps1
 ├── docs/
 │   └── uart_tx_design.md
-└── sim/
-    └── run_sim.md
-
-## Status
-
-In development.
+└── README.md

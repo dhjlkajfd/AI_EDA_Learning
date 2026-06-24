@@ -17,3 +17,8 @@ Thumbs.db
 # Editor folders
 .vscode/
 .idea/
+
+# Microsoft Office temporary files
+~$*.docx
+~$*.xlsx
+~$*.pptx

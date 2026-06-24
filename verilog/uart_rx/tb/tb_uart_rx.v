@@ -61,6 +61,7 @@ module tb_uart_rx;
         run_uart_rx_test(8'h00);
         run_uart_rx_test(8'hFF);
         test_false_start_ignored;
+        test_invalid_stop_bit;
 
         repeat (20) @(posedge clk);
 
@@ -146,6 +147,40 @@ module tb_uart_rx;
         end
     endtask
 
+    task test_invalid_stop_bit;
+        integer wait_count;
+        integer start_error_count;
+        begin
+            start_error_count = error_count;
+            $display("Testing invalid stop bit: test_invalid_stop_bit");
+
+            drive_uart_frame_bad_stop(8'h55);
+
+            for (wait_count = 0; wait_count < FRAME_WAIT_CLKS; wait_count = wait_count + 1) begin
+                @(posedge clk);
+                #1;
+
+                if (data_valid === 1'b1) begin
+                    error_count = error_count + 1;
+                    $display("FAIL: invalid stop bit generated data_valid. data_out=0x%02h wait_count=%0d",
+                             data_out, wait_count);
+                end
+            end
+
+            if (busy !== 1'b0) begin
+                error_count = error_count + 1;
+                $display("FAIL: DUT did not return to idle after invalid stop bit. busy=%b", busy);
+            end
+
+            if (error_count == start_error_count) begin
+                $display("PASS: test_invalid_stop_bit");
+            end else begin
+                $display("FAIL: test_invalid_stop_bit. new_errors=%0d",
+                         error_count - start_error_count);
+            end
+        end
+    endtask
+
     task drive_uart_frame;
         input [7:0] send_data;
         integer bit_num;
@@ -166,6 +201,32 @@ module tb_uart_rx;
             @(negedge clk);
             rx = 1'b1;
             repeat (CLKS_PER_BIT) @(posedge clk);
+        end
+    endtask
+
+    task drive_uart_frame_bad_stop;
+        input [7:0] send_data;
+        integer bit_num;
+        begin
+            rx = 1'b1;
+            repeat (2) @(posedge clk);
+
+            @(negedge clk);
+            rx = 1'b0;
+            repeat (CLKS_PER_BIT) @(posedge clk);
+
+            for (bit_num = 0; bit_num < 8; bit_num = bit_num + 1) begin
+                @(negedge clk);
+                rx = send_data[bit_num];
+                repeat (CLKS_PER_BIT) @(posedge clk);
+            end
+
+            @(negedge clk);
+            rx = 1'b0;
+            repeat (CLKS_PER_BIT) @(posedge clk);
+
+            @(negedge clk);
+            rx = 1'b1;
         end
     endtask
 

@@ -8,7 +8,7 @@ module tb_uart_rx;
     parameter CLK_PERIOD      = 20;
     parameter FRAME_WAIT_CLKS = 12 * CLKS_PER_BIT;
     parameter BUSY_WAIT_CLKS  = 2 * CLKS_PER_BIT;
-    parameter GLOBAL_TIMEOUT  = (FRAME_WAIT_CLKS * 8) + 1000;
+    parameter GLOBAL_TIMEOUT  = (FRAME_WAIT_CLKS * 14) + 1000;
 
     reg        clk;
     reg        rst_n;
@@ -62,6 +62,7 @@ module tb_uart_rx;
         run_uart_rx_test(8'hFF);
         test_false_start_ignored;
         test_invalid_stop_bit;
+        test_back_to_back_frames;
 
         repeat (20) @(posedge clk);
 
@@ -181,6 +182,28 @@ module tb_uart_rx;
         end
     endtask
 
+    task test_back_to_back_frames;
+        integer start_error_count;
+        begin
+            start_error_count = error_count;
+            $display("Testing back-to-back frames: test_back_to_back_frames");
+
+            fork
+                drive_back_to_back_frames;
+                check_back_to_back_frames;
+            join
+
+            if (error_count == start_error_count) begin
+                $display("PASS: test_back_to_back_frames");
+            end else begin
+                $display("FAIL: test_back_to_back_frames. new_errors=%0d",
+                         error_count - start_error_count);
+            end
+
+            repeat (5) @(posedge clk);
+        end
+    endtask
+
     task drive_uart_frame;
         input [7:0] send_data;
         integer bit_num;
@@ -188,6 +211,37 @@ module tb_uart_rx;
             rx = 1'b1;
             repeat (2) @(posedge clk);
 
+            @(negedge clk);
+            rx = 1'b0;
+            repeat (CLKS_PER_BIT) @(posedge clk);
+
+            for (bit_num = 0; bit_num < 8; bit_num = bit_num + 1) begin
+                @(negedge clk);
+                rx = send_data[bit_num];
+                repeat (CLKS_PER_BIT) @(posedge clk);
+            end
+
+            @(negedge clk);
+            rx = 1'b1;
+            repeat (CLKS_PER_BIT) @(posedge clk);
+        end
+    endtask
+
+    task drive_back_to_back_frames;
+        begin
+            rx = 1'b1;
+            repeat (2) @(posedge clk);
+
+            drive_uart_frame_min_idle(8'h12);
+            drive_uart_frame_min_idle(8'h34);
+            drive_uart_frame_min_idle(8'hA5);
+        end
+    endtask
+
+    task drive_uart_frame_min_idle;
+        input [7:0] send_data;
+        integer bit_num;
+        begin
             @(negedge clk);
             rx = 1'b0;
             repeat (CLKS_PER_BIT) @(posedge clk);
@@ -227,6 +281,90 @@ module tb_uart_rx;
 
             @(negedge clk);
             rx = 1'b1;
+        end
+    endtask
+
+    task check_back_to_back_frames;
+        integer frame_idx;
+        integer wait_count;
+        integer monitor_count;
+        integer busy_error_seen;
+        reg [7:0] expected_data;
+        begin
+            for (frame_idx = 0; frame_idx < 3; frame_idx = frame_idx + 1) begin
+                if (frame_idx == 0) begin
+                    expected_data = 8'h12;
+                end else if (frame_idx == 1) begin
+                    expected_data = 8'h34;
+                end else begin
+                    expected_data = 8'hA5;
+                end
+
+                wait_count = 0;
+                monitor_count = 0;
+                busy_error_seen = 0;
+
+                while ((busy !== 1'b1) && (wait_count < BUSY_WAIT_CLKS)) begin
+                    @(posedge clk);
+                    #1;
+                    wait_count = wait_count + 1;
+                end
+
+                if (busy !== 1'b1) begin
+                    error_count = error_count + 1;
+                    $display("FAIL: back-to-back frame %0d did not assert busy. expected=0x%02h",
+                             frame_idx, expected_data);
+                    $finish;
+                end
+
+                while ((data_valid !== 1'b1) && (monitor_count < FRAME_WAIT_CLKS)) begin
+                    @(posedge clk);
+                    #1;
+                    monitor_count = monitor_count + 1;
+
+                    if ((data_valid !== 1'b1) && (busy !== 1'b1) &&
+                        (busy_error_seen == 0)) begin
+                        busy_error_seen = 1;
+                        error_count = error_count + 1;
+                        $display("FAIL: busy dropped early in back-to-back frame %0d. expected=0x%02h monitor_count=%0d",
+                                 frame_idx, expected_data, monitor_count);
+                    end
+                end
+
+                if (data_valid !== 1'b1) begin
+                    error_count = error_count + 1;
+                    $display("FAIL/TIMEOUT: data_valid missing for back-to-back frame %0d. expected=0x%02h",
+                             frame_idx, expected_data);
+                    $finish;
+                end
+
+                if (data_out !== expected_data) begin
+                    error_count = error_count + 1;
+                    $display("FAIL: back-to-back data mismatch at frame %0d. expected=0x%02h actual=0x%02h",
+                             frame_idx, expected_data, data_out);
+                end
+
+                @(posedge clk);
+                #1;
+
+                if (data_valid !== 1'b0) begin
+                    error_count = error_count + 1;
+                    $display("FAIL: data_valid should be one clock in back-to-back frame %0d.",
+                             frame_idx);
+                end
+
+                if (busy !== 1'b0) begin
+                    busy_error_seen = 1;
+                    error_count = error_count + 1;
+                    $display("FAIL: busy should return to 0 between back-to-back frames. frame=%0d busy=%b",
+                             frame_idx, busy);
+                end
+
+                if (busy_error_seen == 0) begin
+                    $display("PASS: back-to-back frame %0d received correctly. data=0x%02h",
+                             frame_idx, expected_data);
+                end
+            end
         end
     endtask
 
